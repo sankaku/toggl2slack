@@ -1,5 +1,35 @@
 extern crate clap;
 use clap::{App, Arg};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglItemTitle {
+    project: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglDataTitle {
+    user: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglItem {
+    title: TogglItemTitle,
+    time: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglData {
+    id: i64,
+    title: TogglDataTitle,
+    items: Vec<TogglItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglResponse {
+    data: Vec<TogglData>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
@@ -77,10 +107,30 @@ async fn main() -> Result<(), reqwest::Error> {
         ])
         .send()
         .await?
-        .text()
+        .json::<TogglResponse>()
         .await?;
 
-    println!("{:#?}", res);
+    let users = res
+        .data
+        .iter()
+        .map(|d| &d.title.user)
+        .collect::<Vec<&String>>();
+    let user_ids = res.data.iter().map(|d| &d.id).collect::<Vec<&i64>>();
+    let projects = res
+        .data
+        .iter()
+        .flat_map(|d| {
+            d.items
+                .iter()
+                .flat_map(|dd| &dd.title.project)
+                .collect::<Vec<_>>()
+        })
+        .collect::<HashSet<_>>();
+    println!("users = {:#?}", users);
+    println!("user_ids = {:#?}", user_ids);
+    println!("projects = {:#?}", projects);
+
+    // println!("{:#?}", res);
 
     Ok(())
 }
