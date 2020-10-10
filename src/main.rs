@@ -2,7 +2,7 @@ extern crate clap;
 use clap::{App, Arg};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglItemTitle {
@@ -157,9 +157,36 @@ async fn main() -> Result<(), reqwest::Error> {
                 .collect::<Vec<_>>()
         })
         .collect::<HashSet<_>>();
+
+    let project_time_by_user = res
+        .data
+        .iter()
+        .map(|d| {
+            let project_times = d
+                .items
+                .iter()
+                .map(|ditem| (&ditem.title.project, &ditem.time))
+                .collect::<Vec<_>>();
+            (&d.title.user, project_times)
+        })
+        .collect::<HashMap<_, _>>();
+
     println!("users = {:#?}", users);
     println!("user_ids = {:#?}", user_ids);
     println!("projects = {:#?}", projects);
+    println!("project_time_by_user = {:#?}", project_time_by_user);
+
+    // create message
+    let message = project_time_by_user
+        .iter()
+        .fold(String::from(""), |acc, item| {
+            acc + &format!(
+                "*{name}*\n\n```{project_times_text}```",
+                name = item.0,
+                project_times_text = convert_project_times(item.1) + "\n"
+            )
+        });
+    println!("message = {:#?}", message);
 
     // send message to Slack
     let mut slack_header = HeaderMap::new();
@@ -171,7 +198,7 @@ async fn main() -> Result<(), reqwest::Error> {
     let slack_url = "https://slack.com/api/chat.postMessage";
     let slack_message = SlackMessage {
         channel: String::from(slack_channel),
-        text: String::from("test"),
+        text: message,
     };
     let res = client
         .post(slack_url)
@@ -181,10 +208,19 @@ async fn main() -> Result<(), reqwest::Error> {
         .await?
         .json::<SlackResponse>()
         .await?;
-
     match res.ok {
         true => println!("Success"),
         false => println!("Error: {:#?}", res.error),
     }
     Ok(())
+}
+
+fn convert_project_times(project_times: &Vec<(&Option<String>, &i64)>) -> String {
+    project_times.iter().fold(String::from(""), |acc, i| {
+        acc + &format!(
+            "{project: <100}{time: >20}\n",
+            project = i.0.clone().unwrap_or("".to_string()),
+            time = i.1
+        )
+    })
 }
