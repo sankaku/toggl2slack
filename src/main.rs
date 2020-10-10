@@ -1,5 +1,6 @@
 extern crate clap;
 use clap::{App, Arg};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -29,6 +30,18 @@ struct TogglData {
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglResponse {
     data: Vec<TogglData>,
+}
+
+#[derive(Serialize, Debug)]
+struct SlackMessage {
+    channel: String,
+    text: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct SlackResponse {
+    ok: bool,
+    error: Option<String>,
 }
 
 #[tokio::main]
@@ -74,6 +87,20 @@ async fn main() -> Result<(), reqwest::Error> {
                 .required(true),
         )
         .arg(
+            Arg::new("slack_token")
+                .long("slack_token")
+                .value_name("Slack token")
+                .about("Sets Slack API token")
+                .required(true),
+        )
+        .arg(
+            Arg::new("slack_channel")
+                .long("slack_channel")
+                .value_name("Slack channel")
+                .about("Sets Slack channel")
+                .required(true),
+        )
+        .arg(
             Arg::new("v")
                 .short('v')
                 .multiple(true)
@@ -91,6 +118,10 @@ async fn main() -> Result<(), reqwest::Error> {
     println!("Value for date_from: {}", date_from);
     let date_to = matches.value_of("date_to").unwrap_or("");
     println!("Value for date_to: {}", date_to);
+    let slack_token = matches.value_of("slack_token").unwrap_or("");
+    println!("Value for slack_token: {}", slack_token);
+    let slack_channel = matches.value_of("slack_channel").unwrap_or("");
+    println!("Value for slack_channel: {}", slack_channel);
 
     let toggl_url = "https://api.track.toggl.com/reports/api/v2/summary";
     let client = reqwest::Client::new();
@@ -130,7 +161,30 @@ async fn main() -> Result<(), reqwest::Error> {
     println!("user_ids = {:#?}", user_ids);
     println!("projects = {:#?}", projects);
 
-    // println!("{:#?}", res);
+    // send message to Slack
+    let mut slack_header = HeaderMap::new();
+    let slack_auth_value = format!("Bearer {}", slack_token);
+    slack_header.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&slack_auth_value).unwrap(),
+    );
+    let slack_url = "https://slack.com/api/chat.postMessage";
+    let slack_message = SlackMessage {
+        channel: String::from(slack_channel),
+        text: String::from("test"),
+    };
+    let res = client
+        .post(slack_url)
+        .json(&slack_message)
+        .headers(slack_header)
+        .send()
+        .await?
+        .json::<SlackResponse>()
+        .await?;
 
+    match res.ok {
+        true => println!("Success"),
+        false => println!("Error: {:#?}", res.error),
+    }
     Ok(())
 }
