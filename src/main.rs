@@ -146,7 +146,7 @@ async fn main() -> Result<(), reqwest::Error> {
         .iter()
         .map(|d| &d.title.user)
         .collect::<Vec<&String>>();
-    let user_ids = res.data.iter().map(|d| &d.id).collect::<Vec<&i64>>();
+    let user_ids = res.data.iter().map(|d| d.id).collect::<Vec<i64>>();
     let projects = res
         .data
         .iter()
@@ -165,7 +165,7 @@ async fn main() -> Result<(), reqwest::Error> {
             let project_times = d
                 .items
                 .iter()
-                .map(|ditem| (&ditem.title.project, &ditem.time))
+                .map(|ditem| (&ditem.title.project, ditem.time))
                 .collect::<Vec<_>>();
             (&d.title.user, project_times)
         })
@@ -215,7 +215,7 @@ async fn main() -> Result<(), reqwest::Error> {
     Ok(())
 }
 
-fn convert_project_times(project_times: &Vec<(&Option<String>, &i64)>) -> String {
+fn convert_project_times(project_times: &Vec<(&Option<String>, i64)>) -> String {
     project_times.iter().fold(String::from(""), |acc, i| {
         acc + &format!(
             "{project: <100}{time: >20}\n",
