@@ -1,8 +1,12 @@
 extern crate clap;
+use chrono::prelude::*;
 use clap::{App, Arg};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use csv::WriterBuilder;
+use itertools::Itertools;
+// use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::{thread, time};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglItemTitle {
@@ -17,12 +21,12 @@ struct TogglDataTitle {
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglItem {
     title: TogglItemTitle,
-    time: i64,
+    time: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglData {
-    id: i64,
+    id: u64,
     title: TogglDataTitle,
     items: Vec<TogglItem>,
 }
@@ -30,6 +34,22 @@ struct TogglData {
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglResponse {
     data: Vec<TogglData>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglDetail {
+    description: String,
+    start: DateTime<FixedOffset>,
+    dur: u64,
+    user: String,
+    project: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TogglDetailResponse {
+    total_count: u64,
+    per_page: u64,
+    data: Vec<TogglDetail>,
 }
 
 #[derive(Serialize, Debug)]
@@ -42,6 +62,13 @@ struct SlackMessage {
 struct SlackResponse {
     ok: bool,
     error: Option<String>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
+struct RecordKey {
+    user: String,
+    project: Option<String>,
+    date: NaiveDate,
 }
 
 #[tokio::main]
@@ -123,6 +150,7 @@ async fn main() -> Result<(), reqwest::Error> {
     let slack_channel = matches.value_of("slack_channel").unwrap_or("");
     println!("Value for slack_channel: {}", slack_channel);
 
+    /*
     let toggl_url = "https://api.track.toggl.com/reports/api/v2/summary";
     let client = reqwest::Client::new();
     let res = client
@@ -175,7 +203,87 @@ async fn main() -> Result<(), reqwest::Error> {
     println!("user_ids = {:#?}", user_ids);
     println!("projects = {:#?}", projects);
     println!("project_time_by_user = {:#?}", project_time_by_user);
+    */
 
+    let toggl_url = "https://api.track.toggl.com/reports/api/v2/details";
+    let client = reqwest::Client::new();
+    let first_res = client
+        .get(toggl_url)
+        .basic_auth(toggl_token, Some("api_token"))
+        .query(&[
+            ("workspace_id", workspace),
+            ("since", date_from),
+            ("until", date_to),
+            ("user_agent", toggl_email),
+        ])
+        .send()
+        .await?
+        .json::<TogglDetailResponse>()
+        .await?;
+    let max_page = (first_res.total_count as f64 / first_res.per_page as f64).ceil() as u64;
+
+    let mut buf: Vec<TogglDetailResponse> = Vec::new();
+    buf.push(first_res);
+    for page in 2..=max_page {
+        // avoid too many accesses
+        thread::sleep(time::Duration::from_millis(2000));
+        let tmp_res = client
+            .get(toggl_url)
+            .basic_auth(toggl_token, Some("api_token"))
+            .query(&[
+                ("workspace_id", workspace),
+                ("since", date_from),
+                ("until", date_to),
+                ("user_agent", toggl_email),
+                ("page", &page.to_string()),
+            ])
+            .send()
+            .await?
+            .json::<TogglDetailResponse>()
+            .await?;
+        buf.push(tmp_res);
+    }
+    let data: Vec<&TogglDetail> = buf.iter().flat_map(|res| &res.data).collect();
+
+    let dur_time_by_project_user_date: Vec<(RecordKey, u64)> = data
+        .iter()
+        .map(|d| {
+            let u = d.user.clone();
+            let p = d.project.clone();
+            let start = d.start.naive_local().date();
+            let dur = d.dur;
+            // ((u, p, start), dur)
+            let record_key = RecordKey {
+                user: u,
+                project: p,
+                date: start,
+            };
+            (record_key, dur)
+        })
+        .collect();
+    println!("{:?}", dur_time_by_project_user_date);
+
+    // sum up duration time by RecordKey
+    let summed_dur_time_by_project_user_date: HashMap<RecordKey, u64> =
+        dur_time_by_project_user_date
+            .into_iter()
+            .into_group_map()
+            .into_iter()
+            .map(|(k, v)| (k, v.iter().sum::<u64>()))
+            .collect();
+    println!("{:#?}", summed_dur_time_by_project_user_date);
+
+    let start_date: NaiveDate = NaiveDate::parse_from_str(date_from, "%Y-%m-%d").unwrap();
+    let end_date: NaiveDate = NaiveDate::parse_from_str(date_to, "%Y-%m-%d").unwrap();
+
+    let csv = create_text_for_csv(
+        &summed_dur_time_by_project_user_date,
+        &start_date,
+        &end_date,
+    );
+    print!("{}", csv);
+
+    /*
     // create message
     let message = project_time_by_user
         .iter()
@@ -212,6 +320,7 @@ async fn main() -> Result<(), reqwest::Error> {
         true => println!("Success"),
         false => println!("Error: {:#?}", res.error),
     }
+    */
     Ok(())
 }
 
@@ -223,4 +332,95 @@ fn convert_project_times(project_times: &Vec<(&Option<String>, i64)>) -> String 
             time = i.1
         )
     })
+}
+
+/// Returns all dates between `start_date` and `end_date`
+///
+/// The dates are sorted ascendingly.
+fn sorted_dates_in_period(start_date: &NaiveDate, end_date: &NaiveDate) -> Vec<NaiveDate> {
+    if start_date > end_date {
+        panic!("Wrong input")
+    };
+
+    let dates: Vec<NaiveDate> = start_date
+        .iter_days()
+        .take_while(|x| x <= &end_date)
+        .collect();
+    dates
+}
+
+/// Returns report text csv-formatted
+///
+/// e.g.
+/// project,   user, date1, date2, date3, ...
+/// projectA, Alice,  0.5,     1,     0, ...
+/// projectA,   Bob,    0,     5,     2, ...
+fn create_text_for_csv(
+    summed_dur_time_by_project_user_date: &HashMap<RecordKey, u64>,
+    start_date: &NaiveDate,
+    end_date: &NaiveDate,
+) -> String {
+    let dates = sorted_dates_in_period(start_date, end_date);
+    let dates_str: Vec<String> = dates
+        .iter()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .collect();
+
+    let projects: HashSet<Option<String>> = summed_dur_time_by_project_user_date
+        .iter()
+        .map(|(k, _)| k.project.clone())
+        .collect();
+    let users: HashSet<String> = summed_dur_time_by_project_user_date
+        .iter()
+        .map(|(k, _)| k.user.clone())
+        .collect();
+
+    let mut wtr = WriterBuilder::new().from_writer(vec![]);
+
+    // write header
+    let header: Vec<String> = [
+        vec!["Project".to_string(), "User".to_string()],
+        dates_str.clone(),
+    ]
+    .concat();
+    wtr.write_record(header);
+    for p in projects.iter() {
+        for u in users.iter() {
+            // let row: Vec<String> = vec![p.expect("NoneProject"), u].iter().chain(dates_str.iter()).collect();
+            // let row: Vec<String> = [vec![p.clone().unwrap_or(String::from("NoneProject")), u.clone()], dates_str.clone()].concat();
+            let durations: Vec<String> = dates
+                .iter()
+                .map(|d| {
+                    let key = &RecordKey {
+                        user: u.clone(),
+                        project: p.clone(),
+                        date: *d,
+                    };
+                    format_duration_time(
+                        summed_dur_time_by_project_user_date.get(key).unwrap_or(&0),
+                    )
+                })
+                .collect();
+            let row: Vec<String> = [
+                vec![p.clone().unwrap_or("NoneProject".to_string()), u.clone()],
+                durations,
+            ]
+            .concat();
+            wtr.write_record(row);
+        }
+    }
+    let data = String::from_utf8(wtr.into_inner().unwrap_or(vec![])).unwrap_or(String::from(""));
+    data
+}
+
+fn format_duration_time(msec: &u64) -> String {
+    let minutes = msec / (1000 * 60);
+    let hours = minutes / 60;
+    let remainder = minutes % 60;
+    let val: f64 = if remainder >= 30 {
+        hours as f64 + 0.5
+    } else {
+        hours as f64
+    };
+    val.to_string()
 }
