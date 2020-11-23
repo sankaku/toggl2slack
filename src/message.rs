@@ -12,10 +12,17 @@ impl MessageCreator {
     pub fn convert_project_times(
         &self,
         project_times_by_user: &HashMap<String, Vec<(Option<String>, u64)>>,
+        start_date: &NaiveDate,
+        end_date: &NaiveDate,
     ) -> String {
+        let title = format!(
+            "*Toggl summary report* [{start}-{end}]\n",
+            start = start_date.format("%Y/%m/%d"),
+            end = end_date.format("%Y/%m/%d")
+        );
         project_times_by_user
             .iter()
-            .fold(String::from(""), |acc, (u, project_times)| {
+            .fold(String::from(title), |acc, (u, project_times)| {
                 acc + &format!(
                     "\n*{name}*\n\n```{project_times_text}```",
                     name = u,
@@ -24,7 +31,7 @@ impl MessageCreator {
                             .iter()
                             .fold(String::from(""), |acc, (p, dur)| {
                                 acc + &format!(
-                                    "{project}: {time}\n",
+                                    "{project}: {time}h\n",
                                     project =
                                         p.clone().unwrap_or(Self::NONE_PROJECT_LABEL.to_string()),
                                     time = Self::format_duration_time(dur),

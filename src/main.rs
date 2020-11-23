@@ -101,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let end_date: NaiveDate = NaiveDate::parse_from_str(date_to, "%Y-%m-%d").unwrap();
 
     let message_creator = message::MessageCreator {};
-    let summary_message = message_creator.convert_project_times(&summary_report);
+    let summary_message =
+        message_creator.convert_project_times(&summary_report, &start_date, &end_date);
     let detailed_message =
         message_creator.create_text_for_csv(&detailed_report, &start_date, &end_date);
 
