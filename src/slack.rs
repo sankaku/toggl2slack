@@ -17,6 +17,8 @@ pub struct SlackAccessor {
     pub token: String,
 }
 impl SlackAccessor {
+    const URL_POST_MESSAGE: &'static str = "https://slack.com/api/chat.postMessage";
+
     pub async fn send_message(
         &self,
         channel: &str,
@@ -29,14 +31,13 @@ impl SlackAccessor {
             AUTHORIZATION,
             HeaderValue::from_str(&slack_auth_value).unwrap(),
         );
-        let url = "https://slack.com/api/chat.postMessage";
         let slack_message = SlackMessage {
             channel: channel.to_string(),
             text: message.to_string(),
         };
         let client = reqwest::Client::new();
         let res = client
-            .post(url)
+            .post(Self::URL_POST_MESSAGE)
             .json(&slack_message)
             .headers(slack_header)
             .send()

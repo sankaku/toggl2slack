@@ -38,14 +38,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::new("date_from")
                 .long("date_from")
                 .value_name("DATE_FROM")
-                .about("Sets the start date of report period. eg. 2020-01-01")
+                .about("Sets the start date of report period(YYYY-MM-DD). eg. 2020-01-01")
                 .required(true),
         )
         .arg(
             Arg::new("date_to")
                 .long("date_to")
                 .value_name("DATE_TO")
-                .about("Sets the end date of report period. eg. 2020-01-31")
+                .about("Sets the end date of report period(YYYY-MM-DD). eg. 2020-01-31")
                 .required(true),
         )
         .arg(
@@ -71,19 +71,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     let toggl_token = matches.value_of("toggl_token").unwrap_or("");
-    println!("Value for toggl_token: {}", toggl_token);
     let workspace = matches.value_of("workspace").unwrap_or("");
-    println!("Value for workspace: {}", workspace);
     let toggl_email = matches.value_of("toggl_email").unwrap_or("");
-    println!("Value for toggl_email: {}", toggl_email);
     let date_from = matches.value_of("date_from").unwrap_or("");
-    println!("Value for date_from: {}", date_from);
     let date_to = matches.value_of("date_to").unwrap_or("");
-    println!("Value for date_to: {}", date_to);
     let slack_token = matches.value_of("slack_token").unwrap_or("");
-    println!("Value for slack_token: {}", slack_token);
     let slack_channel = matches.value_of("slack_channel").unwrap_or("");
-    println!("Value for slack_channel: {}", slack_channel);
 
     let toggl_accessor = toggl::TogglAccessor {
         token: toggl_token.to_string(),
@@ -102,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let message_creator = message::MessageCreator {};
     let summary_message =
-        message_creator.convert_project_times(&summary_report, &start_date, &end_date);
+        message_creator.get_project_message(&summary_report, &start_date, &end_date);
     let detailed_message =
         message_creator.create_text_for_csv(&detailed_report, &start_date, &end_date);
 
