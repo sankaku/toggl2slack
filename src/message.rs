@@ -1,24 +1,21 @@
 use crate::toggl::RecordKey;
+use crate::values::{Duration, Project, ProjectRecords, User};
 use chrono::prelude::*;
 use csv::WriterBuilder;
 use itertools::Itertools;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub struct MessageCreator {}
 impl MessageCreator {
-    const NONE_PROJECT_LABEL: &'static str = "EmptyProject";
-
     /// Formats project-duration vector to string
-    ///
-    /// TODO: The order of users is not conserved. Use BTreeMap instead of HashMap.
     pub fn get_project_message(
         &self,
-        project_times_by_user: &HashMap<String, Vec<(Option<String>, u64)>>,
+        project_times_by_user: &ProjectRecords,
         begin_date: &NaiveDate,
         end_date: &NaiveDate,
     ) -> String {
         let title = self.get_project_message_title(&begin_date, &end_date);
-        project_times_by_user
+        project_times_by_user.value
             .iter()
             .fold(String::from(title), |acc, (u, project_times)| {
                 acc + &self.get_project_message_user_entry(&u, &project_times)
@@ -35,18 +32,18 @@ impl MessageCreator {
 
     fn get_project_message_user_entry(
         &self,
-        user: &String,
-        project_times: &Vec<(Option<String>, u64)>,
+        user: &User,
+        project_times: &Vec<(Project, Duration)>,
     ) -> String {
         format!(
             "\n*{name}*\n\n```{project_times_text}```",
-            name = user,
+            name = user.to_string(),
             project_times_text = project_times
                 .iter()
                 .fold(String::from(""), |acc, (p, dur)| {
                     acc + &format!(
                         "{project}: {time}h\n",
-                        project = p.clone().unwrap_or(Self::NONE_PROJECT_LABEL.to_string()),
+                        project = p.to_string(),
                         time = self.format_duration_time(dur),
                     )
                 })
@@ -78,18 +75,18 @@ impl MessageCreator {
     /// projectA,   Bob,    0,     5,     2, ...
     pub fn create_text_for_csv(
         &self,
-        dur_time_by_project_user_date: &Vec<(RecordKey, u64)>,
+        dur_time_by_project_user_date: &Vec<(RecordKey, Duration)>,
         begin_date: &NaiveDate,
         end_date: &NaiveDate,
     ) -> String {
         let summed_dur_time_by_project_user_date =
             self.sumup_durations(&dur_time_by_project_user_date);
         let dates = self.get_sorted_dates_in_period(begin_date, end_date);
-        let projects: HashSet<Option<String>> = summed_dur_time_by_project_user_date
+        let projects: BTreeSet<Project> = summed_dur_time_by_project_user_date
             .iter()
             .map(|(k, _)| k.project.clone())
             .collect();
-        let users: HashSet<String> = summed_dur_time_by_project_user_date
+        let users: BTreeSet<User> = summed_dur_time_by_project_user_date
             .iter()
             .map(|(k, _)| k.user.clone())
             .collect();
@@ -104,10 +101,10 @@ impl MessageCreator {
 
     fn write_csv(
         &self,
-        users: &HashSet<String>,
-        projects: &HashSet<Option<String>>,
+        users: &BTreeSet<User>,
+        projects: &BTreeSet<Project>,
         dates: &Vec<NaiveDate>,
-        dur_times_for_record_key: &HashMap<RecordKey, u64>,
+        dur_times_for_record_key: &HashMap<RecordKey, Duration>,
     ) -> String {
         let dates_str: Vec<String> = dates
             .iter()
@@ -131,8 +128,8 @@ impl MessageCreator {
                     .collect();
                 let row: Vec<String> = [
                     vec![
-                        p.clone().unwrap_or(Self::NONE_PROJECT_LABEL.to_string()),
-                        u.clone(),
+                        p.to_string(),
+                        u.to_string(),
                     ],
                     durations,
                 ]
@@ -149,10 +146,10 @@ impl MessageCreator {
     fn search_duration_time(
         &self,
         dates: &Vec<NaiveDate>,
-        user: &String,
-        project: &Option<String>,
-        dur_times_for_record_key: &HashMap<RecordKey, u64>,
-    ) -> Vec<u64> {
+        user: &User,
+        project: &Project,
+        dur_times_for_record_key: &HashMap<RecordKey, Duration>,
+    ) -> Vec<Duration> {
         dates
             .iter()
             .map(|d| {
@@ -161,7 +158,7 @@ impl MessageCreator {
                     project: project.clone(),
                     date: *d,
                 };
-                *dur_times_for_record_key.get(&key).unwrap_or(&0)
+                *dur_times_for_record_key.get(&key).unwrap_or(&Duration::new(0))
             })
             .collect()
     }
@@ -169,7 +166,8 @@ impl MessageCreator {
     /// Formats duration time in msec to human-readable string
     ///
     /// e.g. 3600_000(msec) -> "1"
-    fn format_duration_time(&self, msec: &u64) -> String {
+    fn format_duration_time(&self, dur: &Duration) -> String {
+        let msec = dur.value;
         let minutes = msec / (1000 * 60);
         let hours = minutes / 60;
         let remainder = minutes % 60;
@@ -184,14 +182,14 @@ impl MessageCreator {
     /// Sums up duration times per combination of `RecordKey`
     fn sumup_durations(
         &self,
-        dur_time_by_project_user_date: &Vec<(RecordKey, u64)>,
-    ) -> HashMap<RecordKey, u64> {
+        dur_time_by_project_user_date: &Vec<(RecordKey, Duration)>,
+    ) -> HashMap<RecordKey, Duration> {
         dur_time_by_project_user_date
             .into_iter()
             .cloned()
             .into_group_map()
             .into_iter()
-            .map(|(k, v)| (k, v.iter().sum()))
+            .map(|(k, v)| (k, Duration::new(v.iter().map(|dur| dur.value).sum())))
             .collect()
     }
 }
@@ -204,18 +202,18 @@ mod tests {
     fn get_project_message_must_work_when_there_is_only_one_user() {
         let mc = MessageCreator {};
 
-        let user = "Alice".to_string();
-        let project1 = Some("ProjectA".to_string());
-        let project2 = Some("ProjectB".to_string());
-        let dur1 = 3600_000;
-        let dur2 = 7200_000;
-        let project_times_by_user: HashMap<String, Vec<(Option<String>, u64)>> = [(
+        let user = User::new("Alice");
+        let project1 = Project::new(Some("ProjectA"));
+        let project2 = Project::new(Some("ProjectB"));
+        let dur1 = Duration::new(3600_000);
+        let dur2 = Duration::new(7200_000);
+        let project_times_by_user = ProjectRecords::new([(
             user.clone(),
             vec![(project1.clone(), dur1), (project2.clone(), dur2)],
         )]
         .iter()
         .cloned()
-        .collect();
+        .collect());
         let begin_date = NaiveDate::from_ymd(2020, 12, 1);
         let end_date = NaiveDate::from_ymd(2020, 12, 31);
 
@@ -232,13 +230,13 @@ mod tests {
     fn get_project_message_must_return_text_ordered_by_user_and_project_when_there_are_two_users() {
         let mc = MessageCreator {};
 
-        let user1 = "Alice".to_string();
-        let user2 = "Bob".to_string();
-        let project1 = Some("ProjectA".to_string());
-        let project2 = Some("ProjectB".to_string());
-        let dur1 = 3600_000;
-        let dur2 = 7200_000;
-        let project_times_by_user: HashMap<String, Vec<(Option<String>, u64)>> = [
+        let user1 = User::new("Alice");
+        let user2 = User::new("Bob");
+        let project1 = Project::new(Some("ProjectA"));
+        let project2 = Project::new(Some("ProjectB"));
+        let dur1 = Duration::new(3600_000);
+        let dur2 = Duration::new(7200_000);
+        let project_times_by_user = ProjectRecords::new([
             (
                 user2.clone(),
                 vec![(project1.clone(), dur2), (project2.clone(), dur1)],
@@ -250,7 +248,7 @@ mod tests {
         ]
         .iter()
         .cloned()
-        .collect();
+        .collect());
         let begin_date = NaiveDate::from_ymd(2020, 12, 1);
         let end_date = NaiveDate::from_ymd(2020, 12, 31);
 
@@ -268,11 +266,11 @@ mod tests {
     fn get_project_message_user_entry_must_return_text_for_the_given_user() {
         let mc = MessageCreator {};
 
-        let user = "Alice".to_string();
-        let project1 = Some("ProjectA".to_string());
-        let project2 = Some("ProjectB".to_string());
-        let dur1 = 3600_000;
-        let dur2 = 7200_000;
+        let user = User::new("Alice");
+        let project1 = Project::new(Some("ProjectA"));
+        let project2 = Project::new(Some("ProjectB"));
+        let dur1 = Duration::new(3600_000);
+        let dur2 = Duration::new(7200_000);
         let project_times = vec![(project1.clone(), dur1), (project2.clone(), dur2)];
 
         let actual = mc.get_project_message_user_entry(&user, &project_times);
@@ -327,13 +325,13 @@ mod tests {
     fn write_csv_must_return_() {
         let mc = MessageCreator {};
 
-        let user1 = "Alice".to_string();
-        let user2 = "Bob".to_string();
-        let users: HashSet<String> = [user1.clone(), user2.clone()].iter().cloned().collect();
+        let user1 = User::new("Alice");
+        let user2 = User::new("Bob");
+        let users: BTreeSet<User> = [user1.clone(), user2.clone()].iter().cloned().collect();
 
-        let project1 = Some("ProjectA".to_string());
-        let project2 = Some("ProjectB".to_string());
-        let projects: HashSet<Option<String>> = [project1.clone(), project2.clone()]
+        let project1 = Project::new(Some("ProjectA"));
+        let project2 = Project::new(Some("ProjectB"));
+        let projects: BTreeSet<Project> = [project1.clone(), project2.clone()]
             .iter()
             .cloned()
             .collect();
@@ -351,9 +349,9 @@ mod tests {
             project: project2.clone(),
             date: date2,
         };
-        let dur1 = 3600_000;
-        let dur2 = 3600_000;
-        let dur_times_for_record_key: HashMap<RecordKey, u64> =
+        let dur1 = Duration::new(3600_000);
+        let dur2 = Duration::new(3600_000);
+        let dur_times_for_record_key: HashMap<RecordKey, Duration> =
             [(record_key1, dur1), (record_key2, dur2)]
                 .iter()
                 .cloned()
@@ -376,8 +374,8 @@ mod tests {
     fn search_duration_time_must_return_the_corresponding_duration_time_when_it_exists() {
         let mc = MessageCreator {};
 
-        let user = "Alice".to_string();
-        let project = Some("Project".to_string());
+        let user = User::new("Alice");
+        let project = Project::new(Some("Project"));
         let date = NaiveDate::from_ymd(2020, 12, 1);
         let dates = vec![date];
         let record_key = RecordKey {
@@ -385,8 +383,8 @@ mod tests {
             project: project.clone(),
             date: date,
         };
-        let dur = 100;
-        let dur_times_for_record_key: HashMap<RecordKey, u64> =
+        let dur = Duration::new(100);
+        let dur_times_for_record_key: HashMap<RecordKey, Duration> =
             [(record_key, dur)].iter().cloned().collect();
 
         let actual = mc.search_duration_time(&dates, &user, &project, &dur_times_for_record_key);
@@ -399,14 +397,14 @@ mod tests {
     fn search_duration_time_must_return_0_when_it_does_not_exist() {
         let mc = MessageCreator {};
 
-        let user = "Alice".to_string();
-        let project = Some("Project".to_string());
+        let user = User::new("Alice");
+        let project = Project::new(Some("Project"));
         let date = NaiveDate::from_ymd(2020, 12, 1);
         let dates = vec![date];
-        let dur_times_for_record_key: HashMap<RecordKey, u64> = HashMap::new();
+        let dur_times_for_record_key: HashMap<RecordKey, Duration> = HashMap::new();
 
         let actual = mc.search_duration_time(&dates, &user, &project, &dur_times_for_record_key);
-        let expected = vec![0];
+        let expected = vec![Duration::new(0)];
 
         assert_eq!(actual, expected)
     }
@@ -415,7 +413,7 @@ mod tests {
     fn format_duration_time_must_1000_000_to_0() {
         let mc = MessageCreator {};
 
-        let input = 1000_000 as u64;
+        let input = Duration::new(1000_000);
         let actual = mc.format_duration_time(&input);
         let expected = "0".to_string();
 
@@ -426,7 +424,7 @@ mod tests {
     fn format_duration_time_must_1800_000_to_05() {
         let mc = MessageCreator {};
 
-        let input = 1800_000 as u64;
+        let input = Duration::new(1800_000);
         let actual = mc.format_duration_time(&input);
         let expected = "0.5".to_string();
 
@@ -437,7 +435,7 @@ mod tests {
     fn format_duration_time_must_3600_000_to_1() {
         let mc = MessageCreator {};
 
-        let input = 3600_000 as u64;
+        let input = Duration::new(3600_000);
         let actual = mc.format_duration_time(&input);
         let expected = "1".to_string();
 
@@ -449,12 +447,12 @@ mod tests {
         let mc = MessageCreator {};
 
         let record_key = RecordKey {
-            user: "Alice".to_string(),
-            project: Some("Project".to_string()),
+            user: User::new("Alice"),
+            project: Project::new(Some("Project")),
             date: NaiveDate::from_ymd(2020, 12, 1),
         };
-        let dur1 = 100;
-        let dur2 = 200;
+        let dur1 = Duration::new(100);
+        let dur2 = Duration::new(200);
 
         let input = vec![(record_key.clone(), dur1), (record_key.clone(), dur2)];
         let actual = mc.sumup_durations(&input);
@@ -470,17 +468,17 @@ mod tests {
         let mc = MessageCreator {};
 
         let record_key1 = RecordKey {
-            user: "Alice".to_string(),
-            project: Some("Project".to_string()),
+            user: User::new("Alice"),
+            project: Project::new(Some("Project")),
             date: NaiveDate::from_ymd(2020, 12, 1),
         };
         let record_key2 = RecordKey {
-            user: "Alice".to_string(),
-            project: Some("ProjectB".to_string()),
+            user: User::new("Alice"),
+            project: Project::new(Some("ProjectB")),
             date: NaiveDate::from_ymd(2020, 12, 1),
         };
-        let dur1 = 100;
-        let dur2 = 200;
+        let dur1 = Duration::new(100);
+        let dur2 = Duration::new(200);
 
         let input = vec![(record_key1.clone(), dur1), (record_key2.clone(), dur2)];
         let actual = mc.sumup_durations(&input);
