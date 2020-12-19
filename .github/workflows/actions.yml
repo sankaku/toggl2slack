@@ -14,14 +14,14 @@ jobs:
         with:
           toolchain: stable
           profile: minimal
-          components: rustfmt, clippy
+          components: rustfmt
           override: true
 
       - name: Check format
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --check
+          args: -- --check
 
       - name: Test
         uses: actions-rs/cargo@v1
