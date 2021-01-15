@@ -15,7 +15,8 @@ impl MessageCreator {
         end_date: &NaiveDate,
     ) -> String {
         let title = self.get_project_message_title(&begin_date, &end_date);
-        project_times_by_user.value
+        project_times_by_user
+            .value
             .iter()
             .fold(String::from(title), |acc, (u, project_times)| {
                 acc + &self.get_project_message_user_entry(&u, &project_times)
@@ -38,15 +39,13 @@ impl MessageCreator {
         format!(
             "\n*{name}*\n\n```{project_times_text}```",
             name = user.to_string(),
-            project_times_text = project_times
-                .iter()
-                .fold(String::from(""), |acc, (p, dur)| {
-                    acc + &format!(
-                        "{project}: {time}h\n",
-                        project = p.to_string(),
-                        time = self.format_duration_time(dur),
-                    )
-                })
+            project_times_text = project_times.iter().fold(String::new(), |acc, (p, dur)| {
+                acc + &format!(
+                    "{project}: {time}h\n",
+                    project = p.to_string(),
+                    time = self.format_duration_time(dur),
+                )
+            })
         )
     }
 
@@ -126,14 +125,7 @@ impl MessageCreator {
                     .iter()
                     .map(|d| self.format_duration_time(d))
                     .collect();
-                let row: Vec<String> = [
-                    vec![
-                        p.to_string(),
-                        u.to_string(),
-                    ],
-                    durations,
-                ]
-                .concat();
+                let row: Vec<String> = [vec![p.to_string(), u.to_string()], durations].concat();
                 wtr.write_record(row).expect("error");
             }
         }
@@ -158,7 +150,9 @@ impl MessageCreator {
                     project: project.clone(),
                     date: *d,
                 };
-                *dur_times_for_record_key.get(&key).unwrap_or(&Duration::new(0))
+                *dur_times_for_record_key
+                    .get(&key)
+                    .unwrap_or(&Duration::new(0))
             })
             .collect()
     }
@@ -207,17 +201,20 @@ mod tests {
         let project2 = Project::new(Some("ProjectB"));
         let dur1 = Duration::new(3600_000);
         let dur2 = Duration::new(7200_000);
-        let project_times_by_user = ProjectRecords::new([(
-            user.clone(),
-            vec![(project1.clone(), dur1), (project2.clone(), dur2)],
-        )]
-        .iter()
-        .cloned()
-        .collect());
+        let project_times_by_user = ProjectRecords::new(
+            [(
+                user.clone(),
+                vec![(project1.clone(), dur1), (project2.clone(), dur2)],
+            )]
+            .iter()
+            .cloned()
+            .collect(),
+        );
         let begin_date = NaiveDate::from_ymd(2020, 12, 1);
         let end_date = NaiveDate::from_ymd(2020, 12, 31);
 
         let actual = mc.get_project_message(&project_times_by_user, &begin_date, &end_date);
+        println!("{:?}", actual);
         let expected = format!(
             "{}{}",
             "*Toggl summary report* [2020/12/01-2020/12/31]\n",
@@ -236,19 +233,21 @@ mod tests {
         let project2 = Project::new(Some("ProjectB"));
         let dur1 = Duration::new(3600_000);
         let dur2 = Duration::new(7200_000);
-        let project_times_by_user = ProjectRecords::new([
-            (
-                user2.clone(),
-                vec![(project1.clone(), dur2), (project2.clone(), dur1)],
-            ),
-            (
-                user1.clone(),
-                vec![(project1.clone(), dur1), (project2.clone(), dur2)],
-            ),
-        ]
-        .iter()
-        .cloned()
-        .collect());
+        let project_times_by_user = ProjectRecords::new(
+            [
+                (
+                    user2.clone(),
+                    vec![(project1.clone(), dur2), (project2.clone(), dur1)],
+                ),
+                (
+                    user1.clone(),
+                    vec![(project1.clone(), dur1), (project2.clone(), dur2)],
+                ),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        );
         let begin_date = NaiveDate::from_ymd(2020, 12, 1);
         let end_date = NaiveDate::from_ymd(2020, 12, 31);
 

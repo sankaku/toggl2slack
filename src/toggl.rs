@@ -1,4 +1,4 @@
-use crate::values::{Duration, Project, ProjectRecords, User};
+use crate::values::{Duration, Project, ProjectRecords, ProjectValue, User};
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{thread, time};
@@ -83,7 +83,8 @@ impl TogglAccessor {
     ) -> Result<TogglSummaryResponse, Box<dyn std::error::Error>> {
         let url = Self::SUMMARY_REPORT_URL;
         let client = reqwest::Client::new();
-        let res: TogglSummaryResponse = client
+        // let res: TogglSummaryResponse = client
+        let res = client
             .get(url)
             .basic_auth(&self.token, Some("api_token"))
             .query(&[
@@ -95,10 +96,10 @@ impl TogglAccessor {
                 ("subgrouping", "projects"),
             ])
             .send()
-            .await?
-            .json::<TogglSummaryResponse>()
             .await?;
-        Ok(res)
+        // println!("res = {:?}", res.text().await?);
+        let json = res.json::<TogglSummaryResponse>().await?;
+        Ok(json)
     }
 
     /// Converts summary report fetched from Toggl API to HashMap
@@ -207,7 +208,7 @@ mod tests {
         let user_name_2 = User::new("Bob");
         let project_1 = Project::new(Some("ProjectA"));
         let project_2 = Project::new(Some("ProjectB"));
-        let project_3 = Project::new(None);
+        let project_3 = Project::new::<String>(None);
         let t1 = Duration::new(100);
         let t2 = Duration::new(200);
         let t3 = Duration::new(400);
@@ -258,19 +259,21 @@ mod tests {
             ],
         };
         let actual = TogglAccessor::convert_summary_to_hashmap(&res);
-        let expected: ProjectRecords = ProjectRecords::new(vec![
-            (
-                user_name_1.clone(),
-                vec![(project_1.clone(), t1), (project_2.clone(), t2)],
-            ),
-            (
-                user_name_2.clone(),
-                vec![(project_3.clone(), t3), (project_1.clone(), t4)],
-            ),
-        ]
-        .iter()
-        .cloned()
-        .collect());
+        let expected: ProjectRecords = ProjectRecords::new(
+            vec![
+                (
+                    user_name_1.clone(),
+                    vec![(project_1.clone(), t1), (project_2.clone(), t2)],
+                ),
+                (
+                    user_name_2.clone(),
+                    vec![(project_3.clone(), t3), (project_1.clone(), t4)],
+                ),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        );
         assert_eq!(actual, expected)
     }
 
