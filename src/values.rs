@@ -59,9 +59,9 @@ impl Project {
     }
 
     pub fn to_string(&self) -> String {
-        self.clone()
+        self.to_owned()
             .value
-            .map(|v| v.to_string())
+            .map(|v| v.value)
             .unwrap_or(Self::NONE_PROJECT_LABEL.to_string())
     }
 }
@@ -76,10 +76,6 @@ impl ProjectValue {
         ProjectValue {
             value: value.into(),
         }
-    }
-
-    pub fn to_string(&self) -> String {
-        self.to_string()
     }
 }
 

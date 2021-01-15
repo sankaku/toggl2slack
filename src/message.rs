@@ -3,7 +3,7 @@ use crate::values::{Duration, Project, ProjectRecords, User};
 use chrono::prelude::*;
 use csv::WriterBuilder;
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 pub struct MessageCreator {}
 impl MessageCreator {
@@ -214,7 +214,6 @@ mod tests {
         let end_date = NaiveDate::from_ymd(2020, 12, 31);
 
         let actual = mc.get_project_message(&project_times_by_user, &begin_date, &end_date);
-        println!("{:?}", actual);
         let expected = format!(
             "{}{}",
             "*Toggl summary report* [2020/12/01-2020/12/31]\n",

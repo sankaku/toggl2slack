@@ -1,4 +1,4 @@
-use crate::values::{Duration, Project, ProjectRecords, ProjectValue, User};
+use crate::values::{Duration, Project, ProjectRecords, User};
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{thread, time};
