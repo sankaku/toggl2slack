@@ -39,11 +39,6 @@ export class CdkStack extends cdk.Stack {
           subnetType: ec2.SubnetType.PUBLIC,
           cidrMask: 26,
         },
-        {
-          name: `${prefix}PrivateSn`,
-          subnetType: ec2.SubnetType.PRIVATE,
-          cidrMask: 26,
-        },
       ],
     });
     const securityGroup = new ec2.SecurityGroup(this, `${prefix}SecurityGroup`, {
@@ -97,7 +92,10 @@ export class CdkStack extends cdk.Stack {
           name: 'FOO',
           value: 'bar',
         }]
-      }]
+      }],
+      subnetSelection: {
+        subnetType: ec2.SubnetType.PUBLIC,
+      }
     }));
   }
 }
