@@ -1,6 +1,6 @@
+use crate::values::{Duration, Project, ProjectRecords, User};
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::{thread, time};
 
 #[derive(Deserialize, Debug)]
@@ -17,18 +17,18 @@ struct TogglSummary {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TogglSummaryTitle {
-    user: String,
+    user: User,
 }
 
 #[derive(Deserialize, Debug)]
 struct TogglItem {
     title: TogglItemTitle,
-    time: u64,
+    time: Duration,
 }
 
 #[derive(Deserialize, Debug)]
 struct TogglItemTitle {
-    project: Option<String>,
+    project: Project,
 }
 
 #[derive(Deserialize, Debug)]
@@ -42,15 +42,15 @@ struct TogglDetailResponse {
 struct TogglDetail {
     description: String,
     start: DateTime<FixedOffset>,
-    dur: u64,
-    user: String,
-    project: Option<String>,
+    dur: Duration,
+    user: User,
+    project: Project,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct RecordKey {
-    pub user: String,
-    pub project: Option<String>,
+    pub user: User,
+    pub project: Project,
     pub date: NaiveDate,
 }
 
@@ -59,6 +59,7 @@ pub struct TogglAccessor {
     pub workspace: String,
     pub email: String,
 }
+
 impl TogglAccessor {
     const SUMMARY_REPORT_URL: &'static str = "https://api.track.toggl.com/reports/api/v2/summary";
     const DETAILED_REPORT_URL: &'static str = "https://api.track.toggl.com/reports/api/v2/details";
@@ -68,7 +69,7 @@ impl TogglAccessor {
         &self,
         date_from: &str,
         date_to: &str,
-    ) -> Result<HashMap<String, Vec<(Option<String>, u64)>>, Box<dyn std::error::Error>> {
+    ) -> Result<ProjectRecords, Box<dyn std::error::Error>> {
         let res = self.fetch_summary(date_from, date_to).await?;
         let project_time_by_user = Self::convert_summary_to_hashmap(&res);
         Ok(project_time_by_user)
@@ -82,7 +83,8 @@ impl TogglAccessor {
     ) -> Result<TogglSummaryResponse, Box<dyn std::error::Error>> {
         let url = Self::SUMMARY_REPORT_URL;
         let client = reqwest::Client::new();
-        let res: TogglSummaryResponse = client
+        // let res: TogglSummaryResponse = client
+        let res = client
             .get(url)
             .basic_auth(&self.token, Some("api_token"))
             .query(&[
@@ -94,27 +96,27 @@ impl TogglAccessor {
                 ("subgrouping", "projects"),
             ])
             .send()
-            .await?
-            .json::<TogglSummaryResponse>()
             .await?;
-        Ok(res)
+        // println!("res = {:?}", res.text().await?);
+        let json = res.json::<TogglSummaryResponse>().await?;
+        Ok(json)
     }
 
     /// Converts summary report fetched from Toggl API to HashMap
-    fn convert_summary_to_hashmap(
-        res: &TogglSummaryResponse,
-    ) -> HashMap<String, Vec<(Option<String>, u64)>> {
-        res.data
+    fn convert_summary_to_hashmap(res: &TogglSummaryResponse) -> ProjectRecords {
+        let records = res
+            .data
             .iter()
             .map(|d| {
-                let project_times: Vec<(Option<String>, u64)> = d
+                let project_times = d
                     .items
                     .iter()
                     .map(|ditem| (ditem.title.project.clone(), ditem.time))
                     .collect();
                 (d.title.user.clone(), project_times)
             })
-            .collect()
+            .collect();
+        ProjectRecords::new(records)
     }
 
     /// Fetches detailed report from Toggl API and convert it to Vec
@@ -122,9 +124,9 @@ impl TogglAccessor {
         &self,
         date_from: &str,
         date_to: &str,
-    ) -> Result<Vec<(RecordKey, u64)>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<(RecordKey, Duration)>, Box<dyn std::error::Error>> {
         let details = self.fetch_details(date_from, date_to).await?;
-        let dur_time_by_project_user_date: Vec<(RecordKey, u64)> =
+        let dur_time_by_project_user_date: Vec<(RecordKey, Duration)> =
             Self::convert_details_to_vec(&details);
         Ok(dur_time_by_project_user_date)
     }
@@ -179,7 +181,7 @@ impl TogglAccessor {
     }
 
     /// Converts detailed report fetched from Toggl API to Vec
-    fn convert_details_to_vec(data: &Vec<TogglDetail>) -> Vec<(RecordKey, u64)> {
+    fn convert_details_to_vec(data: &Vec<TogglDetail>) -> Vec<(RecordKey, Duration)> {
         data.iter()
             .map(|d| {
                 let u = d.user.clone();
@@ -202,15 +204,15 @@ mod tests {
     use super::*;
     #[test]
     fn convert_summary_to_hashmap_must_work_well() {
-        let user_name_1 = "Alice".to_string();
-        let user_name_2 = "Bob".to_string();
-        let project_1 = Some("ProjectA".to_string());
-        let project_2 = Some("ProjectB".to_string());
-        let project_3 = None;
-        let t1 = 100;
-        let t2 = 200;
-        let t3 = 400;
-        let t4 = 800;
+        let user_name_1 = User::new("Alice");
+        let user_name_2 = User::new("Bob");
+        let project_1 = Project::new(Some("ProjectA"));
+        let project_2 = Project::new(Some("ProjectB"));
+        let project_3 = Project::new::<String>(None);
+        let t1 = Duration::new(100);
+        let t2 = Duration::new(200);
+        let t3 = Duration::new(400);
+        let t4 = Duration::new(800);
 
         let res = TogglSummaryResponse {
             data: vec![
@@ -257,30 +259,32 @@ mod tests {
             ],
         };
         let actual = TogglAccessor::convert_summary_to_hashmap(&res);
-        let expected: HashMap<String, Vec<(Option<String>, u64)>> = vec![
-            (
-                user_name_1.clone(),
-                vec![(project_1.clone(), t1), (project_2.clone(), t2)],
-            ),
-            (
-                user_name_2.clone(),
-                vec![(project_3.clone(), t3), (project_1.clone(), t4)],
-            ),
-        ]
-        .iter()
-        .cloned()
-        .collect();
+        let expected: ProjectRecords = ProjectRecords::new(
+            vec![
+                (
+                    user_name_1.clone(),
+                    vec![(project_1.clone(), t1), (project_2.clone(), t2)],
+                ),
+                (
+                    user_name_2.clone(),
+                    vec![(project_3.clone(), t3), (project_1.clone(), t4)],
+                ),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        );
         assert_eq!(actual, expected)
     }
 
     #[test]
     fn convert_details_to_vec_must_work() {
-        let user1 = "Alice".to_string();
-        let user2 = "Bob".to_string();
-        let project = Some("ProjectA".to_string());
-        let dur1 = 100;
-        let dur2 = 200;
-        let dur3 = 400;
+        let user1 = User::new("Alice");
+        let user2 = User::new("Bob");
+        let project = Project::new(Some("ProjectA"));
+        let dur1 = Duration::new(100);
+        let dur2 = Duration::new(200);
+        let dur3 = Duration::new(400);
         let desc = "".to_string();
 
         let data = vec![
