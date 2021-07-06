@@ -165,12 +165,17 @@ impl MessageCreator {
         let minutes = msec / (1000 * 60);
         let hours = minutes / 60;
         let remainder = minutes % 60;
-        let val: f64 = if remainder >= 30 {
-            hours as f64 + 0.5
-        } else {
-            hours as f64
-        };
-        val.to_string()
+        self.round_minutes_to_hour(hours, remainder).to_string()
+    }
+
+    /// round minutes(0-59) to hour(0.0, 0.5, 1.0)
+    fn round_minutes_to_hour(&self, hours: u64, minutes: u64) -> f64 {
+        let hours_f64 = hours as f64;
+        match minutes {
+            _ if minutes >= 45 => hours_f64 + 1.0,
+            _ if minutes >= 15 => hours_f64 + 0.5,
+            _ => hours_f64,
+        }
     }
 
     /// Sums up duration times per combination of `RecordKey`
@@ -408,10 +413,10 @@ mod tests {
     }
 
     #[test]
-    fn format_duration_time_must_1000_000_to_0() {
+    fn format_duration_time_must_14min_to_0() {
         let mc = MessageCreator {};
 
-        let input = Duration::new(1000_000);
+        let input = Duration::new(14 * 60 * 1000);
         let actual = mc.format_duration_time(&input);
         let expected = "0".to_string();
 
@@ -419,10 +424,10 @@ mod tests {
     }
 
     #[test]
-    fn format_duration_time_must_1800_000_to_05() {
+    fn format_duration_time_must_15min_to_05() {
         let mc = MessageCreator {};
 
-        let input = Duration::new(1800_000);
+        let input = Duration::new(15 * 60 * 1000);
         let actual = mc.format_duration_time(&input);
         let expected = "0.5".to_string();
 
@@ -430,12 +435,82 @@ mod tests {
     }
 
     #[test]
-    fn format_duration_time_must_3600_000_to_1() {
+    fn format_duration_time_must_44min_to_05() {
         let mc = MessageCreator {};
 
-        let input = Duration::new(3600_000);
+        let input = Duration::new(44 * 60 * 1000);
+        let actual = mc.format_duration_time(&input);
+        let expected = "0.5".to_string();
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn format_duration_time_must_45min_to_05() {
+        let mc = MessageCreator {};
+
+        let input = Duration::new(45 * 60 * 1000);
         let actual = mc.format_duration_time(&input);
         let expected = "1".to_string();
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn format_duration_time_must_60min_to_1() {
+        let mc = MessageCreator {};
+
+        let input = Duration::new(60 * 60 * 1000);
+        let actual = mc.format_duration_time(&input);
+        let expected = "1".to_string();
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn round_minutes_to_hour_must_1h14min_to_1hour() {
+        let mc = MessageCreator {};
+
+        let hour = 1;
+        let minutes = 14;
+        let actual = mc.round_minutes_to_hour(hour, minutes);
+        let expected = 1.0;
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn round_minutes_to_hour_must_1h15min_to_1_5hour() {
+        let mc = MessageCreator {};
+
+        let hour = 1;
+        let minutes = 15;
+        let actual = mc.round_minutes_to_hour(hour, minutes);
+        let expected = 1.5;
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn round_minutes_to_hour_must_1h44min_to_1_5hour() {
+        let mc = MessageCreator {};
+
+        let hour = 1;
+        let minutes = 44;
+        let actual = mc.round_minutes_to_hour(hour, minutes);
+        let expected = 1.5;
+
+        assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn round_minutes_to_hour_must_1h45min_to_1_5hour() {
+        let mc = MessageCreator {};
+
+        let hour = 1;
+        let minutes = 45;
+        let actual = mc.round_minutes_to_hour(hour, minutes);
+        let expected = 2.0;
 
         assert_eq!(actual, expected)
     }
