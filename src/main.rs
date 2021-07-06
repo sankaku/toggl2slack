@@ -5,35 +5,25 @@ use toggl2slack::toggl;
 
 use chrono::prelude::*;
 use clap::{App, Arg};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct Env {
+    toggl_token: String,
+    toggl_workspace: String,
+    toggl_email: String,
+    slack_token: String,
+    slack_channel: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let env = envy::from_env::<Env>().expect("Invalid environment variables");
+
     let matches = App::new("toggl2slack")
         .version("1.0")
         .author("sankaku <sankaku.git@gmail.com>")
         .about("Fetch toggl report and send it to Slack")
-        .arg(
-            Arg::new("toggl_token")
-                .short('t')
-                .long("toggl_token")
-                .value_name("TOGGL_API_TOKEN")
-                .about("Sets API token for toggl")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::new("workspace")
-                .long("workspace")
-                .value_name("TOGGL_WORKSPACE")
-                .about("Sets workspace id for toggl")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::new("toggl_email")
-                .long("toggl_email")
-                .value_name("TOGGL_MAIL_ADDRESS")
-                .about("Sets email address for toggl")
-                .takes_value(true),
-        )
         .arg(
             Arg::new("date_from")
                 .long("date_from")
@@ -49,20 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .required(true),
         )
         .arg(
-            Arg::new("slack_token")
-                .long("slack_token")
-                .value_name("Slack token")
-                .about("Sets Slack API token")
-                .required(true),
-        )
-        .arg(
-            Arg::new("slack_channel")
-                .long("slack_channel")
-                .value_name("Slack channel")
-                .about("Sets Slack channel")
-                .required(true),
-        )
-        .arg(
             Arg::new("v")
                 .short('v')
                 .multiple(true)
@@ -70,18 +46,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
-    let toggl_token = matches.value_of("toggl_token").unwrap_or("");
-    let workspace = matches.value_of("workspace").unwrap_or("");
-    let toggl_email = matches.value_of("toggl_email").unwrap_or("");
     let date_from = matches.value_of("date_from").unwrap_or("");
     let date_to = matches.value_of("date_to").unwrap_or("");
-    let slack_token = matches.value_of("slack_token").unwrap_or("");
-    let slack_channel = matches.value_of("slack_channel").unwrap_or("");
 
     let toggl_accessor = toggl::TogglAccessor {
-        token: toggl_token.to_string(),
-        workspace: workspace.to_string(),
-        email: toggl_email.to_string(),
+        token: env.toggl_token.to_string(),
+        workspace: env.toggl_workspace.to_string(),
+        email: env.toggl_email.to_string(),
     };
     let summary_report = toggl_accessor
         .fetch_summary_report(date_from, date_to)
@@ -99,24 +70,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let detailed_message =
         message_creator.create_text_for_csv(&detailed_report, &start_date, &end_date);
 
-    print!(
-        "[summary_message in {date_from} to {date_to}]\n{summary_message}",
-        date_from = &date_from,
-        date_to = &date_to,
-        summary_message = &summary_message
-    );
-    print!(
-        "[detailed_message in {date_from} to {date_to}]\n{detailed_message}",
-        date_from = &date_from,
-        date_to = &date_to,
-        detailed_message = &detailed_message
-    );
+    print_summary_message(&date_from, &date_to, &summary_message);
+    print_detailed_message(&date_from, &date_to, &detailed_message);
 
     let sender = slack::SlackAccessor {
-        token: slack_token.to_string(),
+        token: env.slack_token.to_string(),
     };
     // sender.send_message(slack_channel, &summary_message).await?;
     // sender.send_message(slack_channel, &detailed_message).await?;
 
     Ok(())
+}
+
+/// for debug
+fn print_summary_message(date_from: &str, date_to: &str, message: &str) -> () {
+    println!(
+        "[summary_message in {date_from} to {date_to}]\n{summary_message}",
+        date_from = &date_from,
+        date_to = &date_to,
+        summary_message = &message
+    )
+}
+
+/// for debug
+fn print_detailed_message(date_from: &str, date_to: &str, message: &str) -> () {
+    println!(
+        "[detailed_message in {date_from} to {date_to}]\n{detailed_message}",
+        date_from = &date_from,
+        date_to = &date_to,
+        detailed_message = &message
+    )
 }
